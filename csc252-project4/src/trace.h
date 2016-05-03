@@ -6,4 +6,4 @@
 #include <assert.h>
 #include "cache.h"
 
-void readFile(char *, struct Cache *, char * );
+struct progOutput* readFile(char *, struct Cache *, char *, int);
