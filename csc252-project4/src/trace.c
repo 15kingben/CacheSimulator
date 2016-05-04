@@ -3,7 +3,7 @@
 // Put anything for reading trace files / writing output files here.
 
 /* TODO: read trace file function */
-struct progOutput* readFile(char * filename, struct Cache * cache, char * repPol, int checkSeenBefore){
+struct progOutput* readFile(char * filename, struct Cache * cache, int repPol, int checkSeenBefore){
   FILE *ifp;
   ifp = fopen(filename, "r");
   char mode[2];
@@ -16,21 +16,28 @@ struct progOutput* readFile(char * filename, struct Cache * cache, char * repPol
     exit(1);
   }
 
-  struct progOutput *output = (struct progOutput*)malloc(sizeof(struct progOutput));
+  struct progOutput *output = malloc(sizeof(struct progOutput));
+
+
 
   int k = 0;
 
-  output->accessTypes = malloc((sizeof(char*)) * 1000000);
-  output->accessAdresses = malloc(sizeof(char*) * 1000000);
+  output->accessTypes = malloc(sizeof(char * ) * 1000000);
+  output->accessAdresses = malloc(sizeof(char * ) * 1000000);
 
 
 
-  for(k = 0; k < 1000000; k++){
-    output->accessAdresses[k] = malloc(sizeof(char) * 12);
-    output->accessTypes[k] = malloc(sizeof(char) * 4);
-  }
+
 
   output->lines = malloc(sizeof(int) * 1000000);
+
+  for(k = 0; k < MAX_HISTORY_LENGTH; k++){
+    output->accessAdresses[k] = malloc(sizeof(char) * 100);
+    output->accessTypes[k] = malloc(sizeof(char) * 100);
+  }
+
+
+
   output->size = 0;
 
   int totalReads = 0;
@@ -40,9 +47,15 @@ struct progOutput* readFile(char * filename, struct Cache * cache, char * repPol
   float totalCounter = 0.0;
 
   while (fscanf(ifp, "%s %s", mode, address) != EOF) {
-    printf("%s %s ", mode, address);
 
-    int ret = accessCache(cache, mode, address, NULL, &totalReads, &totalWrites, checkSeenBefore);
+    //printf("%s %s ", mode, address);
+
+    memcpy(output->accessTypes[output->size], mode, 2);
+    memcpy(output->accessAdresses[output->size], address, 10);
+
+
+    int ret = accessCache(cache, mode, address, repPol, &totalReads, &totalWrites, checkSeenBefore);
+
     if(ret == 0){
       totalCounter += 1.0;
       output->lines[output->size] = 0;

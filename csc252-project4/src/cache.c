@@ -1,10 +1,10 @@
 #include "cache.h"
 #include "trace.h"
 
+
+
 int write_xactions = 0;
 int read_xactions = 0;
-int MAX_SEEN_BEFORE = 200000;
-int MAX_HISTORY_LENGTH = 1000000;
 const int DEBUG = 0;
 
 /*
@@ -41,6 +41,8 @@ int main(int argc, char* argv[])
   // hit and miss counts
   int totalHits = 0;
   int totalMisses = 0;
+
+	int repPol = 0;
 
   char * filename;
 
@@ -121,8 +123,7 @@ int main(int argc, char* argv[])
     }
     else if (!strcmp(lruString, argv[i])) {
       // Extra Credit: Implement Me!
-			printf("Unrecognized argument. Exiting.\n");
-			return -1;
+			repPol = 1;// = atoi(argv[i]);
     }
 		//unrecognized input
 		else{
@@ -132,21 +133,91 @@ int main(int argc, char* argv[])
 	}
 
 
+
+
+
+
 	//run standard
-	struct progOutput *standardOutput = runCache(size, line, ways, filename);
+
+	struct progOutput *fullOutput = runCache(size, line, (1024*size)/(line), filename, repPol );
+
+	struct progOutput *standardOutput = runCache(size, line, ways, filename, repPol);
 
 
 
-	struct progOuput *fullOutput = runCache(size, line, (1024*size)/(line), filename );
+	int offsetBits = logBase2(line);
+	int sets = (1024*size)/(line*ways);
+	int indexBits = logBase2(sets);
+	int tagBits = 32 - (indexBits + offsetBits);
+
+
+
+	printf("Ways: %u; Sets: %u; Line Size: %uB\n", ways, sets, line); //
+	printf("Tag: %d bits; Index: %d bits; Offset: %d bits\n", tagBits, indexBits, offsetBits);//
+	/* Print results */
+	printf("Miss Rate: %8lf%%\n", standardOutput->missRatio * 100.0);
+	printf("Read Transactions: %d\n", standardOutput->totalReads);
+	printf("Write Transactions: %d\n", standardOutput->totalWrites);
+
+
+
+	char path[100] = "";
+
+	strcat(path, filename);
+	strcat(path, ".simulated");
+
+	FILE *fp;
+
+
+	fp = fopen(path, "w");
+
+
+
 
 	int k = 0;
-	for(k = 0; k < standardOutput->size; k++){
-		
+	for(k = 0; k < fullOutput->size; k++){
+		fprintf(fp, "%s %s ", standardOutput->accessTypes[k], standardOutput->accessAdresses[k]);
+		int fullResult = fullOutput->lines[k];
+		int standResult = standardOutput->lines[k];
+		if(standResult == 0){
+			fprintf(fp, "hit\n");
+		}else if(standResult == 2){
+			fprintf(fp, "compulsory\n");
+		}else if(fullResult == 1){
+			fprintf(fp, "capacity\n");
+		}else{
+			fprintf(fp, "conflict\n");
+		}
+
+
+		//hit = 0 capacity = 1 compulsory = 2
+
 	}
+	fclose(fp);
+
+
+
+	for(k = 0; k < 100; k++){//MAX_HISTORY_LENGTH
+		free(fullOutput->accessAdresses[k]);
+		free(fullOutput->accessTypes[k]);
+	}
+	free(fullOutput->accessAdresses);
+	free(fullOutput->accessTypes);
+	free(fullOutput->lines);
+	free(fullOutput);
+
+	for(k = 0; k < 100; k++){
+		free(standardOutput->accessAdresses[k]);
+		free(standardOutput->accessTypes[k]);
+	}
+	free(standardOutput->accessAdresses);
+	free(standardOutput->accessTypes);
+	free(standardOutput->lines);
+	free(standardOutput);
 
 
 	if(DEBUG){
-		char c = getchar();
+		//char c = getchar();
 	}
 
 
@@ -154,14 +225,10 @@ int main(int argc, char* argv[])
 
 
 
-  /* Print results */
-  printf("Miss Rate: %8lf%%\n", ((double) totalMisses) / ((double) totalMisses + (double) totalHits) * 100.0);
-  printf("Read Transactions: %d\n", read_xactions);
-  printf("Write Transactions: %d\n", write_xactions);
 
 	if(DEBUG){
 		printf("Dumping Tag History: \n");
-		int k;
+		//int k;
 		//for(k =0; i < cache->tagHistoryIndex; i++){
 			//printf("%d\n", cache->tagHistory[i]);
 		//}
@@ -181,29 +248,51 @@ int logBase2(int number){
 }
 
 
-int accessCache(struct Cache * cache, char * mode, char * address, char * repPol, int *totalReads, int *totalWrites, int checkSeenBefore){
-	if(repPol != NULL){
-		//Implement
-	}else{
+int accessCache(struct Cache * cache, char * mode, char * address, int repPol, int *totalReads, int *totalWrites, int checkSeenBefore){
+	if(repPol == 1){
+
+
 		uint32_t intAddress = (int) strtol(address, NULL, 0);
 		intAddress = intAddress >> (cache->offsetBits); //trash offset Bits
 		uint32_t passAddress = intAddress;
 		uint32_t index = intAddress & ((1 << (cache->indexBits)) - 1);
 		intAddress = intAddress >> (cache->indexBits);
 		uint32_t tag = intAddress & ((1 << (cache->tagBits)) - 1);
-		if(DEBUG){
-			printf("Tag=%d", tag);
-			printf("PassAddress=%d", passAddress);
-		}
+
 
 		int i;
 		for(i = 0; i < cache->ways; i++){
 			if(cache->valid[index][i] != -1 && cache->tags[index][i] == tag ){
+
+				int j = i;
+				int next = j + 1;
+				if(next >= cache->ways){
+					next = 0;
+				}
+
+				while(next != cache->setQueueMarker[index]){
+					//swap j and next
+					int temp = cache->tags[index][j];
+					cache->tags[index][j] = cache->tags[index][next];
+					cache->tags[index][next] = temp;
+
+					//increment j + next & wraparound
+					next += 1;
+					j+= 1;
+					if(next >= cache->ways){
+						next = 0;
+					}
+					if(j >= cache->ways){
+						j = 0;
+					}
+
+				}
+
 				if(strcmp(mode, "s") == 0){
 					cache->dirty[index][i] = 1; //if store change dirty bit
 				}
-				cache->tagHistory[cache->tagHistoryIndex] = passAddress;
-				(cache->tagHistoryIndex)+=1;
+
+
 				return 0; //cache hit
 			}
 		}
@@ -223,9 +312,6 @@ int accessCache(struct Cache * cache, char * mode, char * address, char * repPol
 		//replace memory
 		cache->tags[index][replaceIndex] = tag;
 
-		if(checkInHistory(passAddress, cache)){
-			missType = 3;//conflict
-		}
 		if(checkSeenBefore){
 			if(checkCompulsory(passAddress, cache)){
 					missType = 2; //2: compulsory
@@ -249,19 +335,89 @@ int accessCache(struct Cache * cache, char * mode, char * address, char * repPol
 
 		//set valid bit 1
 		cache->valid[index][replaceIndex] = 1;
-		cache->tagHistory[cache->tagHistoryIndex]  = passAddress;
-		(cache->tagHistoryIndex)  += 1;
+		//cache->tagHistory[cache->tagHistoryIndex]  = passAddress;
+		//(cache->tagHistoryIndex)  += 1;
+		return missType;
+
+
+	}else{
+
+		uint32_t intAddress = (int) strtol(address, NULL, 0);
+		intAddress = intAddress >> (cache->offsetBits); //trash offset Bits
+		uint32_t passAddress = intAddress;
+		uint32_t index = intAddress & ((1 << (cache->indexBits)) - 1);
+		intAddress = intAddress >> (cache->indexBits);
+		uint32_t tag = intAddress & ((1 << (cache->tagBits)) - 1);
+		if(DEBUG){
+			printf("Tag=%d", tag);
+			printf("PassAddress=%d", passAddress);
+		}
+
+		int i;
+		for(i = 0; i < cache->ways; i++){
+			if(cache->valid[index][i] != -1 && cache->tags[index][i] == tag ){
+				if(strcmp(mode, "s") == 0){
+					cache->dirty[index][i] = 1; //if store change dirty bit
+				}
+				//cache->tagHistory[cache->tagHistoryIndex] = passAddress;
+				//(cache->tagHistoryIndex)+=1;
+				return 0; //cache hit
+			}
+		}
+
+		int missType = 1;//capacity
+
+		//CACHE MISS
+
+		//target index to replace
+		int replaceIndex = cache->setQueueMarker[index];
+
+		//if dirty bit write back
+		if(cache->dirty[index][replaceIndex]){
+			(*totalWrites)++;//writeback to memory
+		}
+
+		//replace memory
+		cache->tags[index][replaceIndex] = tag;
+
+		// if(checkInHistory(passAddress, cache)){
+		// 	missType = 3;//conflict
+		// }
+		if(checkSeenBefore){
+			if(checkCompulsory(passAddress, cache)){
+					missType = 2; //2: compulsory
+			}
+		}
+
+
+		//if store set dirty bit 1
+		if(strcmp(mode, "s") == 0){
+			cache->dirty[index][replaceIndex] = 1; //if store change dirty bit
+		}else{
+			cache->dirty[index][replaceIndex] = 0;
+		}
+		(*totalReads)++;
+
+		//increment index & wraparound
+		cache->setQueueMarker[index] += 1;
+		if(cache->setQueueMarker[index] >= cache->ways){
+			cache->setQueueMarker[index] = 0;
+		}
+
+		//set valid bit 1
+		cache->valid[index][replaceIndex] = 1;
+		//cache->tagHistory[cache->tagHistoryIndex]  = passAddress;
+		//(cache->tagHistoryIndex)  += 1;
 		return missType;
 	}
 }
 
 
-struct progOutput* runCache(int size, int line, int ways, char* filename){
+struct progOutput* runCache(int size, int line, int ways, char* filename, int repPol){
 	int offsetBits = logBase2(line);
 	int sets = (1024*size)/(line*ways);
 	int indexBits = logBase2(sets);
 	int tagBits = 32 - (indexBits + offsetBits);
-
 
   /* : Probably should intitalize the cache */
 	struct Cache *cache = initCache(sets, ways);
@@ -272,10 +428,8 @@ struct progOutput* runCache(int size, int line, int ways, char* filename){
 	cache->sets = sets;
 
 
-	printf("Ways: %u; Sets: %u; Line Size: %uB\n", ways, sets, line); //
-	printf("Tag: %d bits; Index: %d bits; Offset: %d bits\n", tagBits, indexBits, offsetBits);//
 
-	struct progOutput* ret = readFile(filename, cache, NULL, 1);
+	struct progOutput* ret = readFile(filename, cache, repPol, 1);
 
 
 	int i;
@@ -290,6 +444,8 @@ struct progOutput* runCache(int size, int line, int ways, char* filename){
 	free(cache->tags);
 	free(cache->dirty);
 	free(cache->seenBefore);
+	free(cache->setQueueMarker);
+	free(cache->tagHistory);
 	free(cache);
 
 	return ret;
@@ -297,64 +453,17 @@ struct progOutput* runCache(int size, int line, int ways, char* filename){
 }
 
 
-int checkInHistory(int pAddress, struct Cache * cache){
-	int i = cache->tagHistoryIndex - 1;
-	int* seenTags = malloc(cache->sets*cache->ways*sizeof(int));
-	int seenTagsIndex = 0;
-
-	while(i >= 0 && (seenTagsIndex < (cache->sets * cache->ways))){
-
-		int j = 0;
-
-		int nextTag = cache->tagHistory[i];
-		int found = 0;
-		while(j < seenTagsIndex){
-			if(seenTags[j] == nextTag){
-				found = 1;
-				break;
-			}
-			j++;
-		}
-
-		if(!found){
-			seenTags[seenTagsIndex] = nextTag;
-			seenTagsIndex++;
-		}
-		i--;
-
-	}
-
-	if(DEBUG){
-		printf("SeenTags");
-	}
-	i = 0;
-	int ret = 0;
-	while(i < seenTagsIndex){
-		if(DEBUG){
-			printf(" %d ", seenTags[i]);
-		}
-		if(seenTags[i] == pAddress){
-			printf("Tag %d at position %d", pAddress, i);
-			ret = 1;
-		}
-		i++;
-	}
-	free(seenTags);
-	return ret;
-}
 
 
 int checkCompulsory(int tag, struct Cache * cache){
 	int i = 0;
 	for(i = 0; i < cache->seenBeforeLength; i++){
 		if(tag == cache->seenBefore[i]){
-			//printf("NOT COMPULSORY tag=%d", tag);
 			return 0;
 		}
 	}
 	cache->seenBefore[cache->seenBeforeLength] = tag;
 	++(cache->seenBeforeLength);
-	//printf(" seen before length: %d tag=%d", cache->seenBeforeLength,tag);
 	return 1;
 }
 
@@ -362,7 +471,7 @@ int checkCompulsory(int tag, struct Cache * cache){
 
 struct Cache* initCache(int sets, int ways){
 	//Initialize cache data structures on heap
-	struct Cache *cache = (struct Cache*)malloc(sizeof(struct Cache));
+	struct Cache *cache = malloc(sizeof(struct Cache));
 
 
 	(cache)->valid = malloc(sets * sizeof(int *));
@@ -384,6 +493,9 @@ struct Cache* initCache(int sets, int ways){
 
 	//where we are in each set
 	cache->setQueueMarker = malloc(sets * sizeof(int));
+	for(i = 0; i < sets; i++){
+		cache->setQueueMarker[i] = 0;
+	}
 
 	//the history for determining capacity uses
 	cache->tagHistory = malloc(MAX_HISTORY_LENGTH * sizeof(int));

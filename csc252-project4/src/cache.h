@@ -12,14 +12,18 @@ extern int read_xactions;
 void printHelp(const char * prog);
 int logBase2(int);
 struct Cache* initCache(int, int);
-int accessCache(struct Cache*, char*, char*, char*, int *, int *, int);
+int accessCache(struct Cache *, char*, char*, int, int *, int *, int);
 int checkCompulsory(int , struct Cache * );
-int checkInHistory(int , struct Cache * );
-struct progOutput* runCache(int , int , int, char* );
+struct progOutput* runCache(int , int , int, char*, int);
 
 
 #ifndef TYPES
 #define TYPES
+
+static const int MAX_SEEN_BEFORE = 200000;
+static const int MAX_HISTORY_LENGTH = 1000000;
+
+
 struct progOutput {
 	int *lines;
 	int size;
